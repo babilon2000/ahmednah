@@ -13,12 +13,12 @@ import pymupdf
 import streamlit as st
 from PIL import Image, ImageDraw
 
-from core.excel_exporter import export_to_excel, lines_dataframe, openings_dataframe, walls_dataframe
-from core.package import build_revit_package
-from core.pdf_extractor import render_page_png
-from core.pipeline import run
+from excel_exporter import export_to_excel, lines_dataframe, openings_dataframe, walls_dataframe
+from package import build_revit_package
+from pdf_extractor import render_page_png
+from pipeline import run
 
-SAMPLE = Path(__file__).parent / "samples" / "sample_plan.pdf"
+SAMPLE = Path(__file__).parent / "sample_plan.pdf"
 NUM_COLS = {c: st.column_config.NumberColumn(c, format="%.2f")
             for c in ["X1", "Y1", "X2", "Y2", "X", "Y", "الطول (م)", "السماكة (م)", "العرض (م)",
                       "سماكة الجدار"]}

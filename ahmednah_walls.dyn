@@ -1,0 +1,871 @@
+{
+  "Uuid": "7b59e4b8-1054-455f-8fad-6b27a608ea9a",
+  "IsCustomNode": false,
+  "Description": "ahmednah - walls, doors and windows from Excel",
+  "Name": "ahmednah_walls",
+  "ElementResolver": {
+    "ResolutionMap": {}
+  },
+  "Inputs": [],
+  "Outputs": [],
+  "Nodes": [
+    {
+      "ConcreteType": "CoreNodeModels.Input.Filename, CoreNodeModels",
+      "NodeType": "ExtensionNode",
+      "Id": "636ac9fb479f4addb5c3b1bc9e30e46d",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "25a0b60873e84817a6c0b2ffd970586d",
+          "Name": "",
+          "Description": "File path",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Excel file from ahmednah",
+      "HintPath": "",
+      "InputValue": ""
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.DoubleInput, CoreNodeModels",
+      "NodeType": "NumberInputNode",
+      "Id": "362d25b1137d42c4bc70764d58200b56",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "0f412ac6eefd45a49b31a396b36e98cd",
+          "Name": "",
+          "Description": "Double",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Wall height (m)",
+      "NumberType": "Double",
+      "InputValue": 3.5
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.StringInput, CoreNodeModels",
+      "NodeType": "StringInputNode",
+      "Id": "c0f2b724cea94593839661f898ad38d6",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "0a6b495727e646119ecf883638fd9db5",
+          "Name": "",
+          "Description": "String",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Level name (empty = lowest)",
+      "InputValue": ""
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "NodeType": "PythonScriptNode",
+      "Id": "07dd8bc26cb543c5951fb5de8a00d0dd",
+      "Inputs": [
+        {
+          "Id": "ad0d0efb1e6e45729be42b64ae059ff6",
+          "Name": "IN[0]",
+          "Description": "Excel path",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "28618e4e960843ffbbff5bff6c44f081",
+          "Name": "IN[1]",
+          "Description": "Height m",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "c2c0b9fcf2ae4b38adaf61887cb00335",
+          "Name": "IN[2]",
+          "Description": "Level name",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "017ccfa9116f47a29e7c07c015c66b04",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "ahmednah: read Excel walls",
+      "Code": "# -*- coding: utf-8 -*-\n\"\"\"\nahmednah - Dynamo Python Script (المرحلة الثانية)\n=================================================\nيُلصق داخل عقدة Python Script في Dynamo (يعمل على CPython3 و IronPython2).\n\nالمدخلات:\n    IN[0]  مسار ملف Excel الناتج من ahmednah (ورقة Walls)\n    IN[1]  ارتفاع الجدار بالمتر (مثلاً 3.5)\n    IN[2]  اسم المستوى (Level) — اتركه فارغاً لاستخدام أدنى مستوى في المشروع\n\nالمخرجات (قائمة من 5 عناصر):\n    OUT[0] curves      : خطوط محاور الجدران (Dynamo Lines)\n    OUT[1] wall_types  : نوع الجدار المناسب لكل خط حسب سماكته\n    OUT[2] level       : المستوى\n    OUT[3] height      : الارتفاع بوحدات Dynamo\n    OUT[4] report      : تقرير نصي\n\nهذه المخرجات تدخل مباشرة إلى عقدة Wall.ByCurveAndHeight في الـ Graph.\n\nملاحظة: لا نستخدم openpyxl لأنها غير موجودة داخل Dynamo.\nملف xlsx هو ملف zip فيه XML، فنقرؤه بمكتبات بايثون القياسية فقط.\n\"\"\"\n\nimport clr\nimport re\nimport zipfile\nimport xml.etree.ElementTree as ET\n\nclr.AddReference(\"ProtoGeometry\")\nfrom Autodesk.DesignScript.Geometry import Point, Line\n\nclr.AddReference(\"RevitNodes\")\nimport Revit\nclr.ImportExtensions(Revit.Elements)\nclr.ImportExtensions(Revit.GeometryConversion)\n\nclr.AddReference(\"RevitServices\")\nfrom RevitServices.Persistence import DocumentManager\nfrom RevitServices.Transactions import TransactionManager\n\nclr.AddReference(\"RevitAPI\")\nimport Autodesk.Revit.DB as DB\n\ndoc = DocumentManager.Instance.CurrentDBDocument\nFT_PER_M = 1.0 / 0.3048\n\n\n# ---------------------------------------------------------------------------\n# 1) قراءة ملف Excel بدون مكتبات خارجية\n# ---------------------------------------------------------------------------\nNS_M = \"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"\nNS_R = \"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"\n\n\ndef _col_index(ref):\n    letters = re.match(r\"([A-Z]+)\", ref).group(1)\n    n = 0\n    for ch in letters:\n        n = n * 26 + (ord(ch) - 64)\n    return n - 1\n\n\ndef read_xlsx_sheet(path, sheet_name):\n    z = zipfile.ZipFile(path)\n    names = z.namelist()\n\n    shared = []\n    if \"xl/sharedStrings.xml\" in names:\n        root = ET.fromstring(z.read(\"xl/sharedStrings.xml\"))\n        for si in root.findall(\"{%s}si\" % NS_M):\n            shared.append(\"\".join([t.text or \"\" for t in si.iter(\"{%s}t\" % NS_M)]))\n\n    wb = ET.fromstring(z.read(\"xl/workbook.xml\"))\n    rels = ET.fromstring(z.read(\"xl/_rels/workbook.xml.rels\"))\n    relmap = dict((r.get(\"Id\"), r.get(\"Target\")) for r in rels)\n\n    target = None\n    for sh in wb.find(\"{%s}sheets\" % NS_M):\n        if sh.get(\"name\") == sheet_name:\n            target = relmap[sh.get(\"{%s}id\" % NS_R)]\n    if target is None:\n        raise Exception(\"Sheet '%s' not found in Excel file\" % sheet_name)\n    target = target[1:] if target.startswith(\"/\") else \"xl/\" + target\n\n    sheet = ET.fromstring(z.read(target))\n    rows = []\n    for row in sheet.find(\"{%s}sheetData\" % NS_M):\n        cells = {}\n        for c in row:\n            t = c.get(\"t\")\n            if t == \"inlineStr\":\n                v = \"\".join([x.text or \"\" for x in c.iter(\"{%s}t\" % NS_M)])\n            else:\n                v_el = c.find(\"{%s}v\" % NS_M)\n                v = v_el.text if v_el is not None else None\n                if v is not None:\n                    if t == \"s\":\n                        v = shared[int(v)]\n                    elif t not in (\"str\", \"b\", \"e\"):\n                        v = float(v)\n            cells[_col_index(c.get(\"r\"))] = v\n        if cells:\n            rows.append([cells.get(i) for i in range(max(cells) + 1)])\n    z.close()\n    return rows\n\n\ndef read_walls(path):\n    rows = read_xlsx_sheet(path, \"Walls\")\n    header = [str(h).strip() for h in rows[0]]\n    need = [\"Wall_ID\", \"X1\", \"Y1\", \"X2\", \"Y2\", \"Thickness_m\"]\n    for n in need:\n        if n not in header:\n            raise Exception(\"Missing column '%s' in sheet Walls\" % n)\n    idx = dict((n, header.index(n)) for n in need)\n    walls = []\n    for r in rows[1:]:\n        try:\n            walls.append(dict((n, float(r[idx[n]])) for n in need))\n        except (TypeError, ValueError, IndexError):\n            continue  # صف فارغ أو ناقص\n    return walls\n\n\n# ---------------------------------------------------------------------------\n# 2) الوحدات: كم وحدة Dynamo في المتر؟\n#    Dynamo for Revit يقرأ الأرقام بوحدات المشروع (مم/سم/م/قدم)، لذلك نحسبها\n# ---------------------------------------------------------------------------\ndef dynamo_units_per_meter():\n    from Revit.GeometryConversion import UnitConverter\n    for spec in (\"SpecTypeId\", \"UnitType\"):\n        try:\n            if spec == \"SpecTypeId\":\n                f = UnitConverter.DynamoToHostFactor(DB.SpecTypeId.Length)  # Revit 2021+\n            else:\n                f = UnitConverter.DynamoToHostFactor(DB.UnitType.UT_Length)  # Revit 2020-\n            return FT_PER_M / f\n        except Exception:\n            pass\n    return 1.0  # احتياط: نفترض متر\n\n\n# ---------------------------------------------------------------------------\n# 3) المستوى\n# ---------------------------------------------------------------------------\ndef get_level(name):\n    levels = list(DB.FilteredElementCollector(doc).OfClass(DB.Level))\n    if not levels:\n        raise Exception(\"No levels in this Revit project\")\n    if name:\n        for l in levels:\n            if l.Name.strip().lower() == name.strip().lower():\n                return l\n        raise Exception(\"Level '%s' not found. Available: %s\" % (name, \", \".join([l.Name for l in levels])))\n    return sorted(levels, key=lambda l: l.Elevation)[0]\n\n\n# ---------------------------------------------------------------------------\n# 4) نوع الجدار حسب السماكة: نبحث عن نوع موجود، وإلا ننشئ واحداً\n# ---------------------------------------------------------------------------\ndef type_name(t):\n    try:\n        return t.Name\n    except Exception:\n        return t.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM).AsString()\n\n\ndef get_or_create_wall_type(width_m, cache, created):\n    key = int(round(width_m * 1000))  # بالمليمتر\n    if key in cache:\n        return cache[key]\n\n    width_ft = width_m * FT_PER_M\n    wanted = \"ahmednah_%dmm\" % key\n    basics = [t for t in DB.FilteredElementCollector(doc).OfClass(DB.WallType)\n              if t.Kind == DB.WallKind.Basic]\n\n    found = None\n    for t in basics:                       # أ) نوع أنشأناه سابقاً بنفس الاسم\n        if type_name(t) == wanted:\n            found = t\n            break\n    if found is None:                      # ب) أي نوع موجود بنفس السماكة (±0.5 مم)\n        for t in basics:\n            if abs(t.Width - width_ft) < 0.5 / 304.8:\n                found = t\n                break\n    if found is None:                      # ج) ننسخ نوعاً بسيطاً ونعدّل سماكته\n        def score(t):\n            cs = t.GetCompoundStructure()\n            layers = cs.LayerCount if cs else 99\n            generic = 0 if \"generic\" in type_name(t).lower() else 1\n            return (layers, generic)\n        base = sorted(basics, key=score)[0]\n        found = base.Duplicate(wanted)\n        cs = found.GetCompoundStructure()\n        thick_i = max(range(cs.LayerCount), key=lambda i: cs.GetLayerWidth(i))\n        new_w = cs.GetLayerWidth(thick_i) + (width_ft - cs.GetWidth())\n        if new_w <= 0:\n            raise Exception(\"Cannot make wall type %s from '%s'\" % (wanted, type_name(base)))\n        cs.SetLayerWidth(thick_i, new_w)\n        found.SetCompoundStructure(cs)\n        created.append(wanted)\n\n    cache[key] = found\n    return found\n\n\n# ---------------------------------------------------------------------------\n# التنفيذ\n# ---------------------------------------------------------------------------\npath = IN[0]\nheight_m = float(IN[1]) if IN[1] else 3.5\nlevel_name = IN[2] if len(IN) > 2 and IN[2] else \"\"\n\nwalls = read_walls(path)\nk = dynamo_units_per_meter()\n\nTransactionManager.Instance.EnsureInTransaction(doc)\nlevel = get_level(level_name)\ncache, created = {}, []\ncurves, types = [], []\nskipped = 0\nfor w in walls:\n    p1 = Point.ByCoordinates(w[\"X1\"] * k, w[\"Y1\"] * k, 0)\n    p2 = Point.ByCoordinates(w[\"X2\"] * k, w[\"Y2\"] * k, 0)\n    if p1.DistanceTo(p2) < 0.05 * k:       # أقصر من 5 سم: Revit يرفضه\n        skipped += 1\n        continue\n    curves.append(Line.ByStartPointEndPoint(p1, p2))\n    types.append(get_or_create_wall_type(w[\"Thickness_m\"], cache, created).ToDSType(True))\nTransactionManager.Instance.TransactionTaskDone()\n\nreport = \"\\n\".join([\n    \"ahmednah - walls ready: %d (skipped %d)\" % (len(curves), skipped),\n    \"Level: %s | Height: %.2f m\" % (level.Name, height_m),\n    \"Dynamo units per meter: %g\" % k,\n    \"Wall types used: %s\" % \", \".join(sorted(set(type_name(t) for t in cache.values()))),\n    \"Wall types created: %s\" % (\", \".join(created) if created else \"none\"),\n])\n\nOUT = [curves, types, level.ToDSType(True), height_m * k, report]\n",
+      "Engine": "CPython3",
+      "EngineName": "CPython3",
+      "VariableInputPorts": true
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.CodeBlockNodeModel, DynamoCore",
+      "NodeType": "CodeBlockNode",
+      "Id": "25a816a7f6e84642a3497a4075d7d2c9",
+      "Inputs": [
+        {
+          "Id": "cf2905e499594988aeceae1879d17aad",
+          "Name": "o",
+          "Description": "",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "fc6efa1553a34a28a7887e880c4ddbab",
+          "Name": "",
+          "Description": "curves",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "4dbdefebec324989bf181d51049fd20b",
+          "Name": "",
+          "Description": "wall types",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "7d8b580e7abd4f099defcb54a9c493d0",
+          "Name": "",
+          "Description": "level",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "9fc2f9843efe435c970f54be69ee147e",
+          "Name": "",
+          "Description": "height",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "a0b2dd991c7c409a893254b936159e8e",
+          "Name": "",
+          "Description": "report",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Split outputs",
+      "Code": "o[0];\no[1];\no[2];\no[3];\no[4];"
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.ZeroTouch.DSFunction, DynamoCore",
+      "NodeType": "FunctionNode",
+      "Id": "a1b052af9f274bf9a5b1b02a57a85935",
+      "Inputs": [
+        {
+          "Id": "880bca2610104f679a694a235923fb32",
+          "Name": "curve",
+          "Description": "Curve",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "bb47fb5c178e467581e4764e24a49c1b",
+          "Name": "height",
+          "Description": "double",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "907dec88521049138e043b573cbb5005",
+          "Name": "level",
+          "Description": "Level",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "c76d57a9e1bc4f68bda4cac45c2fa09e",
+          "Name": "wallType",
+          "Description": "WallType",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "79cd765dc3dd432788f148a8835464cb",
+          "Name": "Wall",
+          "Description": "Wall",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Auto",
+      "Description": "Create walls",
+      "FunctionSignature": "Revit.Elements.Wall.ByCurveAndHeight@Autodesk.DesignScript.Geometry.Curve,double,Revit.Elements.Level,Revit.Elements.WallType"
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Watch, CoreNodeModels",
+      "NodeType": "ExtensionNode",
+      "Id": "0dca5f7de44c4decaaa2e81c725bd951",
+      "Inputs": [
+        {
+          "Id": "27972d1fd70045d9b755de819c5d1611",
+          "Name": "",
+          "Description": "Node to show output from",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "1574b578c76e4d01bac6bf7c411b3b2e",
+          "Name": "",
+          "Description": "Node output",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Report"
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Watch, CoreNodeModels",
+      "NodeType": "ExtensionNode",
+      "Id": "b88e871c006f43b781e3c09a7c1b1696",
+      "Inputs": [
+        {
+          "Id": "3faefbdab4c1463e90aeb8779e673db1",
+          "Name": "",
+          "Description": "Node to show output from",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "003499d890c4433c80cc3c75ebd66269",
+          "Name": "",
+          "Description": "Node output",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Walls"
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.StringInput, CoreNodeModels",
+      "NodeType": "StringInputNode",
+      "Id": "90f45476acda431e831ff3c3a9e7c679",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "3f5d330ab96e4c1d92d9e8608c45eb17",
+          "Name": "",
+          "Description": "String",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Door family/type (optional)",
+      "InputValue": ""
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.StringInput, CoreNodeModels",
+      "NodeType": "StringInputNode",
+      "Id": "e67942dcd3c74aeb96aad9e0674f7d04",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "305b3af215dd451d82ef05f46ba03a89",
+          "Name": "",
+          "Description": "String",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Window family/type (optional)",
+      "InputValue": ""
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.DoubleInput, CoreNodeModels",
+      "NodeType": "NumberInputNode",
+      "Id": "9f3a12cb43484f5282a9953edb19c857",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "6a2f80d65b904f398adaeb7786a97faf",
+          "Name": "",
+          "Description": "Double",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Window sill height (m)",
+      "NumberType": "Double",
+      "InputValue": 0.9
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.DoubleInput, CoreNodeModels",
+      "NodeType": "NumberInputNode",
+      "Id": "049bb06c4dd04f7d9fa4c47e302fec07",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "d1191aff709346d3bfc70313e2db142e",
+          "Name": "",
+          "Description": "Double",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Empty opening height (m)",
+      "NumberType": "Double",
+      "InputValue": 2.1
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "NodeType": "PythonScriptNode",
+      "Id": "96ad2f4fdb4e428cbba108e68a0219df",
+      "Inputs": [
+        {
+          "Id": "e188a99250194d8d9c1197c8cdb35a22",
+          "Name": "IN[0]",
+          "Description": "Walls",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "3aa30831da604c0797cc5db2b1189ab8",
+          "Name": "IN[1]",
+          "Description": "Excel path",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "f5f1c80239b34d74a448f25bb148cc85",
+          "Name": "IN[2]",
+          "Description": "Door type",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "be2fd9fe7ea846ad8ad13d32d1234866",
+          "Name": "IN[3]",
+          "Description": "Window type",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "ed84d9f6de6b45b5b470f720ec5564f3",
+          "Name": "IN[4]",
+          "Description": "Sill m",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "6228ad2e8ac34b3084b6712f6565f1e1",
+          "Name": "IN[5]",
+          "Description": "Opening h m",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "2804f8926a244686845c6519c20380c6",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "ahmednah: doors & windows",
+      "Code": "# -*- coding: utf-8 -*-\n\"\"\"\nahmednah - Dynamo Python Script (المرحلة الثالثة): الأبواب والشبابيك\n====================================================================\nيُلصق داخل عقدة Python Script ثانية، تأتي بعد Wall.ByCurveAndHeight.\n\nالمدخلات:\n    IN[0]  الجدران الناتجة من Wall.ByCurveAndHeight\n    IN[1]  مسار ملف Excel (نفس ملف المرحلة 2 — ورقة Openings)\n    IN[2]  نوع الباب (اختياري) مثل \"Single-Flush\" أو \"Single-Flush : 0915 x 2134mm\"\n    IN[3]  نوع الشباك (اختياري) مثل \"Fixed\"\n    IN[4]  ارتفاع جلسة الشباك بالمتر (افتراضي 0.9)\n    IN[5]  ارتفاع الفتحة الفارغة بالمتر (افتراضي 2.1)\n\nالعمل:\n    - لكل باب/شباك: يختار FamilySymbol بنفس العرض، وإن لم يجد ينسخ نوعاً ويضبط عرضه\n    - يضعه FamilyInstance مستضافاً في الجدار الصحيح (أقرب جدار للنقطة)\n    - يضبط جهة فتح الباب والمفصلة كما في المخطط، ويجعل وجه الشباك للخارج\n    - الفتحات بدون باب: Wall Opening مستطيلة\n    - عند إعادة التشغيل يحذف ما أنشأه سابقاً (معلَّم بـ Comments = ahmednah) فلا يتكرر\n\"\"\"\n\nimport clr\nimport re\nimport zipfile\nimport xml.etree.ElementTree as ET\n\nclr.AddReference(\"RevitServices\")\nfrom RevitServices.Persistence import DocumentManager\nfrom RevitServices.Transactions import TransactionManager\n\nclr.AddReference(\"RevitAPI\")\nimport Autodesk.Revit.DB as DB\nfrom Autodesk.Revit.DB.Structure import StructuralType\n\nclr.AddReference(\"RevitNodes\")\nimport Revit\nclr.ImportExtensions(Revit.Elements)\n\ndoc = DocumentManager.Instance.CurrentDBDocument\nFT = 1.0 / 0.3048     # متر → قدم (وحدة Revit الداخلية)\nTAG = \"ahmednah\"\n\n# ---------------------------------------------------------------------------\n# معايرة اتجاه الأبواب (مرة واحدة فقط):\n# عائلات الأبواب تختلف في تعريف الوجه (Facing) واليد (Hand).\n# الإعداد الافتراضي مناسب لعائلات Revit القياسية (Single-Flush):\n#   الباب يفتح عكس اتجاه FacingOrientation، والمفصلة عكس اتجاه HandOrientation.\n# إذا فتحت كل الأبواب للجهة الخطأ → غيّر SWING_TOWARD_FACING\n# إذا كانت كل المفصلات في الطرف الخطأ → غيّر HINGE_TOWARD_HAND\n# ---------------------------------------------------------------------------\nSWING_TOWARD_FACING = False\nHINGE_TOWARD_HAND = False\n\n\n# ---------------------------------------------------------------------------\n# قراءة Excel (نفس قارئ المرحلة 2 — مكتبات قياسية فقط)\n# ---------------------------------------------------------------------------\nNS_M = \"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"\nNS_R = \"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"\n\n\ndef _col_index(ref):\n    letters = re.match(r\"([A-Z]+)\", ref).group(1)\n    n = 0\n    for ch in letters:\n        n = n * 26 + (ord(ch) - 64)\n    return n - 1\n\n\ndef read_xlsx_sheet(path, sheet_name):\n    z = zipfile.ZipFile(path)\n    names = z.namelist()\n\n    shared = []\n    if \"xl/sharedStrings.xml\" in names:\n        root = ET.fromstring(z.read(\"xl/sharedStrings.xml\"))\n        for si in root.findall(\"{%s}si\" % NS_M):\n            shared.append(\"\".join([t.text or \"\" for t in si.iter(\"{%s}t\" % NS_M)]))\n\n    wb = ET.fromstring(z.read(\"xl/workbook.xml\"))\n    rels = ET.fromstring(z.read(\"xl/_rels/workbook.xml.rels\"))\n    relmap = dict((r.get(\"Id\"), r.get(\"Target\")) for r in rels)\n\n    target = None\n    for sh in wb.find(\"{%s}sheets\" % NS_M):\n        if sh.get(\"name\") == sheet_name:\n            target = relmap[sh.get(\"{%s}id\" % NS_R)]\n    if target is None:\n        raise Exception(\"Sheet '%s' not found in Excel file\" % sheet_name)\n    target = target[1:] if target.startswith(\"/\") else \"xl/\" + target\n\n    sheet = ET.fromstring(z.read(target))\n    rows = []\n    for row in sheet.find(\"{%s}sheetData\" % NS_M):\n        cells = {}\n        for c in row:\n            t = c.get(\"t\")\n            if t == \"inlineStr\":\n                v = \"\".join([x.text or \"\" for x in c.iter(\"{%s}t\" % NS_M)])\n            else:\n                v_el = c.find(\"{%s}v\" % NS_M)\n                v = v_el.text if v_el is not None else None\n                if v is not None:\n                    if t == \"s\":\n                        v = shared[int(v)]\n                    elif t not in (\"str\", \"b\", \"e\"):\n                        v = float(v)\n            cells[_col_index(c.get(\"r\"))] = v\n        if cells:\n            rows.append([cells.get(i) for i in range(max(cells) + 1)])\n    z.close()\n    return rows\n\n\ndef read_openings(path):\n    rows = read_xlsx_sheet(path, \"Openings\")\n    if len(rows) < 2:\n        return []\n    header = [str(h).strip() for h in rows[0]]\n    out = []\n    for r in rows[1:]:\n        r = r + [None] * (len(header) - len(r))\n        d = dict(zip(header, r))\n        try:\n            out.append({\n                \"id\": int(d[\"Opening_ID\"]), \"type\": str(d[\"Type\"]),\n                \"x\": float(d[\"X\"]), \"y\": float(d[\"Y\"]), \"width\": float(d[\"Width_m\"]),\n                \"thk\": float(d[\"Wall_Thickness_m\"] or 0.2),\n                \"swing\": int(float(d.get(\"Swing_Side\") or 0)),\n                \"hinge\": str(d.get(\"Hinge_At\") or \"\"),\n                \"leaves\": int(float(d.get(\"Leaves\") or 1)),\n            })\n        except (TypeError, ValueError, KeyError):\n            continue\n    return out\n\n\n# ---------------------------------------------------------------------------\n# أدوات\n# ---------------------------------------------------------------------------\ndef flatten(x):\n    if isinstance(x, (list, tuple)):\n        res = []\n        for i in x:\n            res.extend(flatten(i))\n        return res\n    return [x]\n\n\ndef ename(e):\n    try:\n        return e.Name\n    except Exception:\n        return e.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM).AsString()\n\n\ndef full_name(sym):\n    return \"%s : %s\" % (sym.FamilyName, ename(sym))\n\n\ndef width_param(sym):\n    for bip in (\"DOOR_WIDTH\", \"WINDOW_WIDTH\", \"FAMILY_WIDTH_PARAM\", \"FURNITURE_WIDTH\"):\n        try:\n            p = sym.get_Parameter(getattr(DB.BuiltInParameter, bip))\n        except Exception:\n            p = None\n        if p is not None and p.StorageType == DB.StorageType.Double:\n            return p\n    for n in (\"Width\", \"width\", \"Rough Width\"):\n        p = sym.LookupParameter(n)\n        if p is not None and p.StorageType == DB.StorageType.Double:\n            return p\n    return None\n\n\ndef set_comment(el, text):\n    p = el.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)\n    if p is not None and not p.IsReadOnly:\n        p.Set(text)\n\n\ndef get_comment(el):\n    p = el.get_Parameter(DB.BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)\n    return p.AsString() if p is not None else None\n\n\nclass SymbolPicker(object):\n    \"\"\"يختار (أو ينشئ) FamilySymbol بالعرض المطلوب لكل فئة.\"\"\"\n\n    def __init__(self, bic, wanted_name):\n        self.all = list(DB.FilteredElementCollector(doc).OfClass(DB.FamilySymbol).OfCategory(bic))\n        self.pool = self.all\n        if wanted_name:\n            w = wanted_name.strip().lower()\n            m = [s for s in self.all if w == full_name(s).lower() or w == ename(s).lower()\n                 or w == s.FamilyName.lower()]\n            if not m:\n                m = [s for s in self.all if w in full_name(s).lower()]\n            if not m:\n                raise Exception(\"Family type '%s' not found. Available: %s\" %\n                                (wanted_name, \"; \".join(sorted(set(full_name(s) for s in self.all)))))\n            self.pool = m\n        self.cache = {}\n        self.created = []\n        self.warnings = []\n\n    def get(self, width_m, leaves=1):\n        if not self.pool:\n            return None\n        key = (int(round(width_m * 1000)), leaves)\n        if key in self.cache:\n            return self.cache[key]\n        pool = self.pool\n        if leaves >= 2:\n            dbl = [s for s in pool if \"double\" in s.FamilyName.lower()]\n            pool = dbl or pool\n        target = width_m * FT\n        best = None\n        for s in pool:  # أ) نوع موجود بنفس العرض (±1 سم)\n            p = width_param(s)\n            if p is not None and abs(p.AsDouble() - target) < 0.01 * FT:\n                best = s\n                break\n        if best is None:  # ب) ننسخ نوعاً من نفس العائلة ونضبط عرضه\n            base = pool[0]\n            new_name = \"%s_%s_%dmm\" % (ename(base), TAG, key[0])\n            existing = [s for s in self.all if ename(s) == new_name and s.FamilyName == base.FamilyName]\n            if existing:\n                best = existing[0]\n            else:\n                best = base.Duplicate(new_name)\n                p = width_param(best)\n                if p is not None and not p.IsReadOnly:\n                    p.Set(target)\n                    self.created.append(full_name(best))\n                else:\n                    self.warnings.append(\"Width not editable in '%s' — used as is\" % full_name(base))\n                self.all.append(best)\n        if not best.IsActive:\n            best.Activate()\n            doc.Regenerate()\n        self.cache[key] = best\n        return best\n\n\ndef host_for(walls, pt, thk):\n    \"\"\"أقرب جدار للنقطة، بشرط أن تقع النقطة على امتداده.\"\"\"\n    best, best_d = None, None\n    for w in walls:\n        lc = w.Location\n        if not isinstance(lc, DB.LocationCurve):\n            continue\n        c = lc.Curve\n        res = c.Project(pt)\n        if res is None:\n            continue\n        d = res.XYZPoint.DistanceTo(DB.XYZ(pt.X, pt.Y, res.XYZPoint.Z))\n        if d < (thk / 2 + 0.05) * FT and (best_d is None or d < best_d):\n            best, best_d = w, d\n    return best\n\n\ndef wall_dir(w):\n    c = w.Location.Curve\n    v = c.GetEndPoint(1) - c.GetEndPoint(0)\n    return DB.XYZ(v.X, v.Y, 0).Normalize()\n\n\n# ---------------------------------------------------------------------------\n# التنفيذ\n# ---------------------------------------------------------------------------\nwalls = [w for w in flatten(UnwrapElement(IN[0])) if isinstance(w, DB.Wall)]\npath = IN[1]\ndoor_name = IN[2] if len(IN) > 2 and IN[2] else \"\"\nwindow_name = IN[3] if len(IN) > 3 and IN[3] else \"\"\nsill_m = float(IN[4]) if len(IN) > 4 and IN[4] is not None else 0.9\nopen_h_m = float(IN[5]) if len(IN) > 5 and IN[5] is not None else 2.1\n\n\n\ndef id_val(eid):  # Revit 2024+ يستخدم Value بدل IntegerValue\n    return eid.Value if hasattr(eid, \"Value\") else eid.IntegerValue\n\n\nops = read_openings(path)\nwall_ids = set(id_val(w.Id) for w in walls)\n\nTransactionManager.Instance.EnsureInTransaction(doc)\n\n# 1) حذف ما أنشأناه في تشغيل سابق\nold = []\nfor bic in (DB.BuiltInCategory.OST_Doors, DB.BuiltInCategory.OST_Windows):\n    for fi in DB.FilteredElementCollector(doc).OfCategory(bic).WhereElementIsNotElementType():\n        if get_comment(fi) == TAG and fi.Host is not None and id_val(fi.Host.Id) in wall_ids:\n            old.append(fi.Id)\nfor op in DB.FilteredElementCollector(doc).OfClass(DB.Opening):\n    if op.Host is not None and id_val(op.Host.Id) in wall_ids:\n        old.append(op.Id)\nfor eid in old:\n    doc.Delete(eid)\n\n# 2) مركز المبنى (لنعرف أين \"الخارج\" عند توجيه الشبابيك)\nmids = [w.Location.Curve.Evaluate(0.5, True) for w in walls]\ncx = sum(p.X for p in mids) / max(len(mids), 1)\ncy = sum(p.Y for p in mids) / max(len(mids), 1)\n\ndoors = SymbolPicker(DB.BuiltInCategory.OST_Doors, door_name)\nwins = SymbolPicker(DB.BuiltInCategory.OST_Windows, window_name)\n\nplaced, errors, n_open = [], [], 0\nfor o in ops:\n    try:\n        pt = DB.XYZ(o[\"x\"] * FT, o[\"y\"] * FT, 0)\n        wall = host_for(walls, pt, o[\"thk\"])\n        if wall is None:\n            errors.append(\"#%d: no host wall found\" % o[\"id\"])\n            continue\n        level = doc.GetElement(wall.LevelId)\n        z = level.Elevation\n        d = wall_dir(wall)\n        pt = DB.XYZ(pt.X, pt.Y, z)\n\n        if o[\"type\"] == \"Opening\":\n            half = d.Multiply(o[\"width\"] * FT / 2)\n            doc.Create.NewOpening(wall, pt.Subtract(half), pt.Add(half).Add(DB.XYZ(0, 0, open_h_m * FT)))\n            n_open += 1\n            continue\n\n        picker = doors if o[\"type\"] == \"Door\" else wins\n        sym = picker.get(o[\"width\"], o[\"leaves\"])\n        if sym is None:\n            errors.append(\"#%d: no %s family loaded in project\" % (o[\"id\"], o[\"type\"]))\n            continue\n        inst = doc.Create.NewFamilyInstance(pt, sym, wall, level, StructuralType.NonStructural)\n        set_comment(inst, TAG)\n        if o[\"type\"] == \"Window\":\n            p = inst.get_Parameter(DB.BuiltInParameter.INSTANCE_SILL_HEIGHT_PARAM)\n            if p is not None and not p.IsReadOnly:\n                p.Set(sill_m * FT)\n        placed.append((inst, o, d))\n    except Exception as ex:\n        errors.append(\"#%d: %s\" % (o[\"id\"], ex))\n\n# 3) ضبط الاتجاهات (يحتاج Regenerate حتى تُحسب Facing/Hand)\ndoc.Regenerate()\nleft = lambda v: DB.XYZ(-v.Y, v.X, 0)\nfor inst, o, d in placed:\n    try:\n        facing = inst.FacingOrientation\n        if o[\"type\"] == \"Door\" and o[\"swing\"] != 0:\n            swing = left(d).Multiply(o[\"swing\"])\n            want = 1 if SWING_TOWARD_FACING else -1\n            if facing.DotProduct(swing) * want < 0:\n                inst.flipFacing()\n            if o[\"hinge\"] in (\"start\", \"end\"):\n                doc.Regenerate()\n                hinge = d.Negate() if o[\"hinge\"] == \"start\" else d\n                want = 1 if HINGE_TOWARD_HAND else -1\n                if inst.HandOrientation.DotProduct(hinge) * want < 0:\n                    inst.flipHand()\n        elif o[\"type\"] == \"Window\":\n            p = inst.Location.Point\n            outward = DB.XYZ(p.X - cx, p.Y - cy, 0)\n            n = left(d)\n            out_n = n if n.DotProduct(outward) > 0 else n.Negate()\n            if facing.DotProduct(out_n) < 0:\n                inst.flipFacing()\n    except Exception as ex:\n        errors.append(\"#%d orient: %s\" % (o[\"id\"], ex))\n\nTransactionManager.Instance.TransactionTaskDone()\n\nn_d = sum(1 for _, o, _ in placed if o[\"type\"] == \"Door\")\nn_w = sum(1 for _, o, _ in placed if o[\"type\"] == \"Window\")\nreport = [\n    \"ahmednah - openings in Excel: %d\" % len(ops),\n    \"Doors placed: %d | Windows placed: %d | Empty openings: %d\" % (n_d, n_w, n_open),\n    \"Removed from previous run: %d\" % len(old),\n    \"Door types: %s\" % (\", \".join(sorted(set(full_name(s) for s in doors.cache.values()))) or \"-\"),\n    \"Window types: %s\" % (\", \".join(sorted(set(full_name(s) for s in wins.cache.values()))) or \"-\"),\n    \"Types created: %s\" % (\", \".join(doors.created + wins.created) or \"none\"),\n]\nreport += doors.warnings + wins.warnings\nif errors:\n    report.append(\"ERRORS:\")\n    report += errors\n\nOUT = [[i.ToDSType(True) for i, _, _ in placed], \"\\n\".join(report)]\n",
+      "Engine": "CPython3",
+      "EngineName": "CPython3",
+      "VariableInputPorts": true
+    },
+    {
+      "ConcreteType": "Dynamo.Graph.Nodes.CodeBlockNodeModel, DynamoCore",
+      "NodeType": "CodeBlockNode",
+      "Id": "a225c7739cdd454f9392f8b6ac40b527",
+      "Inputs": [
+        {
+          "Id": "d1d797efb1c343c78da0ea1f71e22ca3",
+          "Name": "p",
+          "Description": "",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "fdffded984984d419222cec7fff15f7a",
+          "Name": "",
+          "Description": "instances",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        },
+        {
+          "Id": "c0356cc6bea14900b7c2035851a41e73",
+          "Name": "",
+          "Description": "report",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Split",
+      "Code": "p[0];\np[1];"
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Watch, CoreNodeModels",
+      "NodeType": "ExtensionNode",
+      "Id": "6b064de696044ffaa5c6f2a4caab4067",
+      "Inputs": [
+        {
+          "Id": "7a23a6ba64aa411ba2f6f4502e5c0b0e",
+          "Name": "",
+          "Description": "Node to show output from",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "5b4ea1d2ecdb4f16a426b3d6f543e545",
+          "Name": "",
+          "Description": "Node output",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Openings report"
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Watch, CoreNodeModels",
+      "NodeType": "ExtensionNode",
+      "Id": "67d65412179e4648a56050aa3e6b5df0",
+      "Inputs": [
+        {
+          "Id": "cdcd7920ae7f46b999adfac51f281f6a",
+          "Name": "",
+          "Description": "Node to show output from",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "fcab26b6bba54e8f9681ab4de924c4d8",
+          "Name": "",
+          "Description": "Node output",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Doors & windows"
+    }
+  ],
+  "Connectors": [
+    {
+      "Start": "25a0b60873e84817a6c0b2ffd970586d",
+      "End": "ad0d0efb1e6e45729be42b64ae059ff6",
+      "Id": "d9c80669fc4e4541938ae2d4eed73641",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "0f412ac6eefd45a49b31a396b36e98cd",
+      "End": "28618e4e960843ffbbff5bff6c44f081",
+      "Id": "0d76ed3f0bca44c2896bcf18237ac0ea",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "0a6b495727e646119ecf883638fd9db5",
+      "End": "c2c0b9fcf2ae4b38adaf61887cb00335",
+      "Id": "b66f0e2fcc26408f99cf87f6edd0e763",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "017ccfa9116f47a29e7c07c015c66b04",
+      "End": "cf2905e499594988aeceae1879d17aad",
+      "Id": "69614e7704b04b678bc0ec9546c06530",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "fc6efa1553a34a28a7887e880c4ddbab",
+      "End": "880bca2610104f679a694a235923fb32",
+      "Id": "07516d2075d84d2eb4c46a491b3ffa9c",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "9fc2f9843efe435c970f54be69ee147e",
+      "End": "bb47fb5c178e467581e4764e24a49c1b",
+      "Id": "3d75589d9ec445bcaf81a341a605b7cc",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "7d8b580e7abd4f099defcb54a9c493d0",
+      "End": "907dec88521049138e043b573cbb5005",
+      "Id": "0bb3f050975148348b8799ba62514efb",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "4dbdefebec324989bf181d51049fd20b",
+      "End": "c76d57a9e1bc4f68bda4cac45c2fa09e",
+      "Id": "7e58ccaae1404c459a5e278446bb05a4",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "a0b2dd991c7c409a893254b936159e8e",
+      "End": "27972d1fd70045d9b755de819c5d1611",
+      "Id": "06349fa7430e46e595083f29e4653eef",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "79cd765dc3dd432788f148a8835464cb",
+      "End": "3faefbdab4c1463e90aeb8779e673db1",
+      "Id": "5cefe80b7de44a11bdec54605e73e4fc",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "79cd765dc3dd432788f148a8835464cb",
+      "End": "e188a99250194d8d9c1197c8cdb35a22",
+      "Id": "e3f48567887143baaa0fcb08d02fcd66",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "25a0b60873e84817a6c0b2ffd970586d",
+      "End": "3aa30831da604c0797cc5db2b1189ab8",
+      "Id": "66951bc4bd0f496bbe36cb9f4e02039c",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "3f5d330ab96e4c1d92d9e8608c45eb17",
+      "End": "f5f1c80239b34d74a448f25bb148cc85",
+      "Id": "f6c5e08d77f549cb8d1a507ff1163b24",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "305b3af215dd451d82ef05f46ba03a89",
+      "End": "be2fd9fe7ea846ad8ad13d32d1234866",
+      "Id": "21ee98ae3ce94299ba6c5f72efe21d43",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "6a2f80d65b904f398adaeb7786a97faf",
+      "End": "ed84d9f6de6b45b5b470f720ec5564f3",
+      "Id": "81de2dc5cacf444281c1d7d492b3c135",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "d1191aff709346d3bfc70313e2db142e",
+      "End": "6228ad2e8ac34b3084b6712f6565f1e1",
+      "Id": "54843f59ea8543b794b222653139eacd",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "2804f8926a244686845c6519c20380c6",
+      "End": "d1d797efb1c343c78da0ea1f71e22ca3",
+      "Id": "a9e9757736d349c095a5c841f1a5105f",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "c0356cc6bea14900b7c2035851a41e73",
+      "End": "7a23a6ba64aa411ba2f6f4502e5c0b0e",
+      "Id": "fd1aa8bf75564aad9736ea5b12f202ca",
+      "IsHidden": "False"
+    },
+    {
+      "Start": "fdffded984984d419222cec7fff15f7a",
+      "End": "cdcd7920ae7f46b999adfac51f281f6a",
+      "Id": "0fffc969882847beaa7bb6f652939db4",
+      "IsHidden": "False"
+    }
+  ],
+  "Dependencies": [],
+  "NodeLibraryDependencies": [],
+  "Bindings": [],
+  "View": {
+    "Dynamo": {
+      "ScaleFactor": 1.0,
+      "HasRunWithoutCrash": true,
+      "IsVisibleInDynamoLibrary": true,
+      "Version": "2.13.1.3887",
+      "RunType": "Manual",
+      "RunPeriod": "1000"
+    },
+    "Camera": {
+      "Name": "Background Preview",
+      "EyeX": -17.0,
+      "EyeY": 24.0,
+      "EyeZ": 50.0,
+      "LookX": 12.0,
+      "LookY": -13.0,
+      "LookZ": -58.0,
+      "UpX": 0.0,
+      "UpY": 1.0,
+      "UpZ": 0.0
+    },
+    "NodeViews": [
+      {
+        "Id": "636ac9fb479f4addb5c3b1bc9e30e46d",
+        "Name": "1. Excel File (ahmednah)",
+        "IsSetAsInput": true,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 0,
+        "Y": 0
+      },
+      {
+        "Id": "362d25b1137d42c4bc70764d58200b56",
+        "Name": "2. Wall Height (m)",
+        "IsSetAsInput": true,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 0,
+        "Y": 160
+      },
+      {
+        "Id": "c0f2b724cea94593839661f898ad38d6",
+        "Name": "3. Level Name (empty = lowest)",
+        "IsSetAsInput": true,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 0,
+        "Y": 300
+      },
+      {
+        "Id": "07dd8bc26cb543c5951fb5de8a00d0dd",
+        "Name": "ahmednah - Read Walls",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 420,
+        "Y": 120
+      },
+      {
+        "Id": "25a816a7f6e84642a3497a4075d7d2c9",
+        "Name": "Split",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 720,
+        "Y": 120
+      },
+      {
+        "Id": "a1b052af9f274bf9a5b1b02a57a85935",
+        "Name": "Wall.ByCurveAndHeight",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1000,
+        "Y": 80
+      },
+      {
+        "Id": "0dca5f7de44c4decaaa2e81c725bd951",
+        "Name": "Report",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1000,
+        "Y": 380
+      },
+      {
+        "Id": "b88e871c006f43b781e3c09a7c1b1696",
+        "Name": "Walls",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1380,
+        "Y": 80
+      },
+      {
+        "Id": "90f45476acda431e831ff3c3a9e7c679",
+        "Name": "4. Door Type (empty = any)",
+        "IsSetAsInput": true,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1000,
+        "Y": 620
+      },
+      {
+        "Id": "e67942dcd3c74aeb96aad9e0674f7d04",
+        "Name": "5. Window Type (empty = any)",
+        "IsSetAsInput": true,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1000,
+        "Y": 740
+      },
+      {
+        "Id": "9f3a12cb43484f5282a9953edb19c857",
+        "Name": "6. Window Sill Height (m)",
+        "IsSetAsInput": true,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1000,
+        "Y": 860
+      },
+      {
+        "Id": "049bb06c4dd04f7d9fa4c47e302fec07",
+        "Name": "7. Empty Opening Height (m)",
+        "IsSetAsInput": true,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1000,
+        "Y": 980
+      },
+      {
+        "Id": "96ad2f4fdb4e428cbba108e68a0219df",
+        "Name": "ahmednah - Doors & Windows",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1420,
+        "Y": 640
+      },
+      {
+        "Id": "a225c7739cdd454f9392f8b6ac40b527",
+        "Name": "Split",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1720,
+        "Y": 640
+      },
+      {
+        "Id": "6b064de696044ffaa5c6f2a4caab4067",
+        "Name": "Openings Report",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1950,
+        "Y": 760
+      },
+      {
+        "Id": "67d65412179e4648a56050aa3e6b5df0",
+        "Name": "Doors & Windows",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "ShowGeometry": true,
+        "X": 1950,
+        "Y": 560
+      }
+    ],
+    "Annotations": [],
+    "X": 40.0,
+    "Y": 60.0,
+    "Zoom": 0.8
+  }
+}
